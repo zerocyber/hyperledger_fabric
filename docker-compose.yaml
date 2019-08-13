@@ -1,0 +1,165 @@
+version: '2'
+
+services:
+  ca:
+    image: hyperledger/fabric-ca:1.4.0
+    environment:
+      - FABRIC_CA_HOME=/etc/hyperledger/fabric-ca-server
+      - FABRIC_CA_SERVER_CA_NAME=fabric_ca
+      - FABRIC_CA_SERVER_TLS_ENABLED=false
+    ports:
+      - "7054:7054"
+    command: sh -c 'fabric-ca-server start -b admin:adminpw --cfg.affiliations.allowremove --cfg.identities.allowremove -d'
+    volumes:
+      - ./crypto-config/ca/:/etc/hyperledger/fabric-ca-server-config
+    container_name: fabric_ca
+
+
+  cli:
+    container_name: cli
+    image: hyperledger/fabric-tools:1.4.0
+    tty: true
+    environment:
+      - GOPATH=/opt/gopath
+      - CORE_VM_ENDPOINT=unix:///host/var/run/docker.sock
+      - CORE_LOGGING_LEVEL=DEBUG
+      - CORE_PEER_ID=cli
+    command: /bin/bash
+    volumes:
+      - /var/run/:/host/var/run/
+      - ./crypto-config:/etc/hyperledger/fabric-ca-server
+      - ./channel-artifacts/genesis.block:/var/hyperledger/orderer/orderer.genesis.block
+
+  peer0:
+    container_name: peer0
+    image: hyperledger/fabric-peer:1.4.0
+    environment:
+      - CORE_PEER_ID=peer0
+      - CORE_PEER_ADDRESS=peer0:7051
+      - CORE_PEER_CHAINCODEADDRESS=peer0:7052
+      - CORE_PEER_CHAINCODELISTENADDRESS=0.0.0.0:7052
+      - CORE_PEER_GOSSIP_EXTERNALENDPOINT=peer0:7051
+      - CORE_PEER_LOCALMSPID=Org0MSP
+      - CORE_VM_ENDPOINT=unix:///host/var/run/docker.sock
+      # the following setting starts chaincode containers on the same
+      # bridge network as the peers
+      # https://docs.docker.com/compose/networking/
+      #- CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE=e2e_default
+      #- CORE_LOGGING_LEVEL=ERROR
+      - CORE_LOGGING_LEVEL=DEBUG
+      - CORE_PEER_TLS_ENABLED=false
+      - CORE_PEER_GOSSIP_USELEADERELECTION=true
+      - CORE_PEER_GOSSIP_ORGLEADER=false
+      - CORE_PEER_PROFILE_ENABLED=true
+      - CORE_PEER_TLS_CERT_FILE=/etc/hyperledger/fabric/tls/server.crt
+      - CORE_PEER_TLS_KEY_FILE=/etc/hyperledger/fabric/tls/server.key
+      - CORE_PEER_TLS_ROOTCERT_FILE=/etc/hyperledger/fabric/tls/ca.crt
+      - GODEBUG=netdns=go
+    working_dir: /opt/gopath/src/github.com/hyperledger/fabric/peer
+#    command: bash
+    command: peer node start
+    volumes:
+        - /var/run/:/host/var/run/
+        - ./crypto-config/ca/peer0.org0/msp:/etc/hyperledger/fabric/msp
+        - ./crypto-config/ca/peer0.org0/tls:/etc/hyperledger/fabric/tls
+    ports:
+      - 7051:7051
+      - 7052:7052
+      - 7053:7053
+
+  peer1:
+    container_name: peer1
+    image: hyperledger/fabric-peer:1.4.0
+    environment:
+      - CORE_PEER_ID=peer1.com
+      - CORE_PEER_ADDRESS=peer1:7051
+      - CORE_PEER_CHAINCODEADDRESS=peer1:7052
+      - CORE_PEER_CHAINCODELISTENADDRESS=0.0.0.0:7052
+      - CORE_PEER_GOSSIP_EXTERNALENDPOINT=peer1:7051
+      - CORE_PEER_LOCALMSPID=Org1MSP
+      - CORE_VM_ENDPOINT=unix:///host/var/run/docker.sock
+      # the following setting starts chaincode containers on the same
+      # bridge network as the peers
+      # https://docs.docker.com/compose/networking/
+      #- CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE=e2e_default
+      #- CORE_LOGGING_LEVEL=ERROR
+      - CORE_LOGGING_LEVEL=DEBUG
+      - CORE_PEER_TLS_ENABLED=false
+      - CORE_PEER_GOSSIP_USELEADERELECTION=true
+      - CORE_PEER_GOSSIP_ORGLEADER=false
+      - CORE_PEER_PROFILE_ENABLED=true
+      - CORE_PEER_TLS_CERT_FILE=/etc/hyperledger/fabric/tls/server.crt
+      - CORE_PEER_TLS_KEY_FILE=/etc/hyperledger/fabric/tls/server.key
+      - CORE_PEER_TLS_ROOTCERT_FILE=/etc/hyperledger/fabric/tls/ca.crt
+      - GODEBUG=netdns=go
+
+    working_dir: /opt/gopath/src/github.com/hyperledger/fabric/peer
+    command: peer node start
+    volumes:
+        - /var/run/:/host/var/run/
+        - ./crypto-config/ca/peer1.org1/msp:/etc/hyperledger/fabric/msp
+        - ./crypto-config/ca/peer1.org1/tls:/etc/hyperledger/fabric/tls
+    ports:
+      - 8051:7051
+      - 8052:7052
+      - 8053:7053
+
+  zookeeper0:
+    container_name: zookeeper0
+    image: hyperledger/fabric-zookeeper
+    restart: always
+    ports:
+      - '2181'
+      - '2888'
+      - '3888'
+    environment:
+      - ZOO_MY_ID=1
+      - ZOO_SERVERS=server.1=zookeeper0:2888:3888
+
+  kafka0:
+    container_name: kafka0
+    image: hyperledger/fabric-kafka
+    restart: always
+    environment:
+      - KAFKA_MESSAGE_MAX_BYTES=103809024 # 99 * 1024 * 1024 B
+      - KAFKA_REPLICA_FETCH_MAX_BYTES=103809024 # 99 * 1024 * 1024 B
+      - KAFKA_UNCLEAN_LEADER_ELECTION_ENABLE=false
+    ports:
+      - '9092'
+    environment:
+      - KAFKA_BROKER_ID=0
+      - KAFKA_MIN_INSYNC_REPLICAS=1
+      - KAFKA_DEFAULT_REPLICATION_FACTOR=1
+      - KAFKA_ZOOKEEPER_CONNECT=zookeeper0:2181
+    depends_on:
+      - zookeeper0
+
+  orderer0:
+    container_name: orderer0
+    image: hyperledger/fabric-orderer:1.4.0
+    environment:
+      - ORDERER_GENERAL_LOGLEVEL=debug
+      - ORDERER_GENERAL_LISTENADDRESS=0.0.0.0
+      - ORDERER_GENERAL_GENESISMETHOD=file
+      - ORDERER_GENERAL_GENESISFILE=/var/hyperledger/orderer/orderer.genesis.block
+      - ORDERER_GENERAL_LOCALMSPID=OrdererMSP
+      - ORDERER_GENERAL_LOCALMSPDIR=/var/hyperledger/orderer/msp
+      # enabled TLS
+      - ORDERER_GENERAL_TLS_ENABLED=false
+      - ORDERER_GENERAL_TLS_PRIVATEKEY=/var/hyperledger/orderer/tls/server.key
+      - ORDERER_GENERAL_TLS_CERTIFICATE=/var/hyperledger/orderer/tls/server.crt
+      - ORDERER_GENERAL_TLS_ROOTCAS=[/var/hyperledger/orderer/tls/ca.crt]
+      - ORDERER_KAFKA_RETRY_SHORTINTERVAL=1s
+      - ORDERER_KAFKA_RETRY_SHORTTOTAL=30s
+      - ORDERER_KAFKA_VERBOSE=true
+      - GODEBUG=netdns=go
+    working_dir: /opt/gopath/src/github.com/hyperledger/fabric
+    command: orderer
+    volumes:
+    - ./channel-artifacts/genesis.block:/var/hyperledger/orderer/orderer.genesis.block
+    - ./crypto-config/ca/orderer0.orderer0/msp:/var/hyperledger/orderer/msp
+    - ./crypto-config/ca/orderer0.orderer0/tls:/var/hyperledger/orderer/tls
+    ports:
+      - 7050:7050
+    depends_on:
+      - kafka0
